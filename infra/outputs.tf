@@ -7,8 +7,9 @@ output "database_endpoint" {
   value = aws_db_instance.postgres.address
 }
 
-# Copy these into the repository's "production" environment as variables
-# (Settings > Environments). None of them are secrets.
+# Add these as repository variables (Settings > Secrets and variables >
+# Actions > Variables) and create an environment named after var.environment.
+# None of them are secrets.
 output "github_actions_variables" {
   value = {
     AWS_REGION                 = var.region
