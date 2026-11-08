@@ -1,0 +1,640 @@
+openapi: 3.1.0
+info:
+  title: Fairshare API
+  version: 1.0.0
+  description: |
+    Track shared expenses in a group and work out who owes whom.
+
+    Money is always an integer number of minor units in the group's currency
+    (cents for USD or EUR), never a decimal. Errors use RFC 9457 problem
+    details with the `application/problem+json` media type.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Accounts and access tokens.
+  - name: groups
+    description: Groups and their members.
+  - name: expenses
+    description: Shared costs and how they are split.
+  - name: balances
+    description: Net positions, suggested transfers and recorded repayments.
+  - name: health
+    description: Probes for the load balancer and orchestrator.
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The process is running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Readiness probe
+      description: Fails while the database is unreachable.
+      operationId: ready
+      security: []
+      responses:
+        "200":
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: A dependency is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      summary: Create an account
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: Account created and signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/me:
+    get:
+      tags: [auth]
+      summary: The signed-in user
+      operationId: getMe
+      responses:
+        "200":
+          description: The current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/groups:
+    get:
+      tags: [groups]
+      summary: Groups you belong to
+      operationId: listGroups
+      responses:
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [groups]
+      summary: Create a group
+      description: You become its owner and first member.
+      operationId: createGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGroupRequest" }
+      responses:
+        "201":
+          description: Group created.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/groups/{groupID}:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    get:
+      tags: [groups]
+      summary: A group and its members
+      operationId: getGroup
+      responses:
+        "200":
+          description: The group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/groups/{groupID}/members:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    post:
+      tags: [groups]
+      summary: Add a member by email
+      description: Only the group owner can add members. The person must already have an account.
+      operationId: addMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddMemberRequest" }
+      responses:
+        "200":
+          description: The updated group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/groups/{groupID}/expenses:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    get:
+      tags: [expenses]
+      summary: List expenses
+      description: Newest first, paginated with an opaque cursor.
+      operationId: listExpenses
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          description: The `next_cursor` from the previous page.
+          schema: { type: string }
+      responses:
+        "200":
+          description: One page of expenses.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpensePage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    post:
+      tags: [expenses]
+      summary: Add an expense
+      operationId: createExpense
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExpenseRequest" }
+            examples:
+              equal:
+                summary: Split evenly
+                value:
+                  description: Dinner at Taberna
+                  amount: 12000
+                  spent_on: "2026-05-14"
+                  split:
+                    method: equal
+                    participants:
+                      - user_id: 7f1c6a52-3f4e-4b1d-9a57-1b2f0f7c9e01
+                      - user_id: 0c9b8d3e-5a6f-4e21-8c3d-2a1b0f9e8d02
+              percent:
+                summary: Split 70/30
+                value:
+                  description: Car rental
+                  amount: 30000
+                  split:
+                    method: percent
+                    participants:
+                      - user_id: 7f1c6a52-3f4e-4b1d-9a57-1b2f0f7c9e01
+                        value: 7000
+                      - user_id: 0c9b8d3e-5a6f-4e21-8c3d-2a1b0f9e8d02
+                        value: 3000
+      responses:
+        "201":
+          description: Expense added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/groups/{groupID}/expenses/{expenseID}:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+      - name: expenseID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [expenses]
+      summary: Delete an expense
+      description: Allowed for the person who added it and for the group owner.
+      operationId: deleteExpense
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/groups/{groupID}/balances:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    get:
+      tags: [balances]
+      summary: Who owes whom
+      description: |
+        Each member's net position, plus a short list of transfers that
+        would settle the whole group. A group of n people never needs more
+        than n-1 transfers.
+      operationId: getBalances
+      responses:
+        "200":
+          description: Balances and suggested transfers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Balances" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/groups/{groupID}/settlements:
+    parameters:
+      - $ref: "#/components/parameters/GroupID"
+    get:
+      tags: [balances]
+      summary: List settlements
+      operationId: listSettlements
+      responses:
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettlementList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [balances]
+      summary: Record a repayment
+      description: Either person involved can record it, as can the group owner.
+      operationId: createSettlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSettlementRequest" }
+      responses:
+        "201":
+          description: Settlement recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settlement" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    GroupID:
+      name: groupID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: The request body is malformed.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: Missing, invalid or expired credentials.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: You are not allowed to do this.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Does not exist, or you are not a member of the group.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: Conflicts with existing data.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ValidationFailed:
+      description: One or more fields are invalid. `errors` maps field names to messages.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, examples: [ok] }
+
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+        request_id: { type: string }
+
+    Money:
+      description: An amount in minor units, such as cents.
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 1000000000000
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, name, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        password: { type: string, minLength: 8, maxLength: 72 }
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+
+    User:
+      type: object
+      required: [id, email, name, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Session:
+      type: object
+      required: [access_token, token_type, expires_at, user]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, const: Bearer }
+        expires_at: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/User" }
+
+    CreateGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [name, currency]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        currency:
+          type: string
+          description: ISO 4217 code.
+          pattern: "^[A-Za-z]{3}$"
+          examples: [EUR]
+
+    AddMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    Group:
+      type: object
+      required: [id, name, currency, created_by, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        currency: { type: string, examples: [EUR] }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    GroupList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Group" }
+
+    Member:
+      type: object
+      required: [user_id, name, email, role, joined_at]
+      properties:
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [owner, member] }
+        joined_at: { type: string, format: date-time }
+
+    GroupDetail:
+      allOf:
+        - $ref: "#/components/schemas/Group"
+        - type: object
+          required: [members]
+          properties:
+            members:
+              type: array
+              items: { $ref: "#/components/schemas/Member" }
+
+    SplitMethod:
+      type: string
+      enum: [equal, exact, percent, shares]
+      description: |
+        - `equal`: `value` is ignored; leftover cents go to the first participants.
+        - `exact`: `value` is each person's amount; they must add up to the total.
+        - `percent`: `value` is basis points (2500 = 25%); they must add up to 10000.
+        - `shares`: `value` is a relative weight, e.g. 2 for a couple and 1 for a single.
+
+    CreateExpenseRequest:
+      type: object
+      additionalProperties: false
+      required: [description, amount, split]
+      properties:
+        description: { type: string, minLength: 1, maxLength: 200 }
+        amount: { $ref: "#/components/schemas/Money" }
+        paid_by:
+          type: string
+          format: uuid
+          description: Defaults to you.
+        spent_on:
+          type: string
+          format: date
+          description: Defaults to today.
+        split:
+          type: object
+          additionalProperties: false
+          required: [method, participants]
+          properties:
+            method: { $ref: "#/components/schemas/SplitMethod" }
+            participants:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [user_id]
+                properties:
+                  user_id: { type: string, format: uuid }
+                  value: { type: integer, format: int64 }
+
+    Share:
+      type: object
+      required: [user_id, amount]
+      properties:
+        user_id: { type: string, format: uuid }
+        amount: { type: integer, format: int64 }
+
+    Expense:
+      type: object
+      required: [id, group_id, paid_by, description, amount, spent_on, created_by, created_at, shares]
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        paid_by: { type: string, format: uuid }
+        description: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        spent_on: { type: string, format: date }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        shares:
+          type: array
+          items: { $ref: "#/components/schemas/Share" }
+
+    ExpensePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Expense" }
+        next_cursor:
+          type: string
+          description: Absent on the last page.
+
+    Balance:
+      type: object
+      required: [user_id, name, net]
+      properties:
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        net:
+          type: integer
+          format: int64
+          description: Positive means the group owes this person; negative means they owe the group.
+
+    Transfer:
+      type: object
+      required: [from, to, amount]
+      properties:
+        from: { type: string, format: uuid }
+        to: { type: string, format: uuid }
+        amount: { $ref: "#/components/schemas/Money" }
+
+    Balances:
+      type: object
+      required: [balances, transfers]
+      properties:
+        balances:
+          type: array
+          items: { $ref: "#/components/schemas/Balance" }
+        transfers:
+          type: array
+          items: { $ref: "#/components/schemas/Transfer" }
+
+    CreateSettlementRequest:
+      type: object
+      additionalProperties: false
+      required: [from, to, amount]
+      properties:
+        from: { type: string, format: uuid }
+        to: { type: string, format: uuid }
+        amount: { $ref: "#/components/schemas/Money" }
+
+    Settlement:
+      type: object
+      required: [id, group_id, from, to, amount, created_by, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        from: { type: string, format: uuid }
+        to: { type: string, format: uuid }
+        amount: { $ref: "#/components/schemas/Money" }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    SettlementList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Settlement" }
