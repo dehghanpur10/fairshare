@@ -34,9 +34,9 @@ const shutdownTimeout = 20 * time.Second
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := run(ctx, os.Args[1:], os.Getenv, os.Stdout); err != nil {
+	err := run(ctx, os.Args[1:], os.Getenv, os.Stdout)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "fairshare:", err)
 		os.Exit(1)
 	}

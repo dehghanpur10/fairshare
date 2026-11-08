@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -93,7 +94,7 @@ func (s *server) recoverPanics(next http.Handler) http.Handler {
 			if v == nil {
 				return
 			}
-			if v == http.ErrAbortHandler {
+			if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 				panic(v)
 			}
 			s.log.ErrorContext(r.Context(), "panic", "value", v, "stack", string(debug.Stack()))

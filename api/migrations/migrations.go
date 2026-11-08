@@ -42,6 +42,6 @@ func Up(ctx context.Context, db *sql.DB) (int, error) {
 // two schemas in the same database (as the tests do) never contends.
 func lockID(schema string) int64 {
 	h := fnv.New64a()
-	h.Write([]byte("fairshare/migrations/" + schema))
+	_, _ = h.Write([]byte("fairshare/migrations/" + schema)) // hash writes never fail
 	return int64(h.Sum64() >> 1)
 }

@@ -328,7 +328,7 @@ func TestMalformedRequests(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequestWithContext(t.Context(), "POST", a.url+"/v1/auth/register", strings.NewReader(tt.body))
+			req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, a.url+"/v1/auth/register", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", tt.ctype)
 			res, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -345,23 +345,23 @@ func TestMalformedRequests(t *testing.T) {
 
 func TestCORS(t *testing.T) {
 	a := newAPI(t)
-	preflight := func(origin string) *http.Response {
+	preflight := func(origin string) (int, http.Header) {
 		req, _ := http.NewRequestWithContext(t.Context(), http.MethodOptions, a.url+"/v1/groups", nil)
 		req.Header.Set("Origin", origin)
-		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
-		res.Body.Close()
-		return res
+		defer res.Body.Close()
+		return res.StatusCode, res.Header
 	}
 
-	res := preflight(allowedOrigin)
-	if res.StatusCode != http.StatusNoContent || res.Header.Get("Access-Control-Allow-Origin") != allowedOrigin {
-		t.Errorf("allowed origin: status %d, ACAO %q", res.StatusCode, res.Header.Get("Access-Control-Allow-Origin"))
+	status, header := preflight(allowedOrigin)
+	if status != http.StatusNoContent || header.Get("Access-Control-Allow-Origin") != allowedOrigin {
+		t.Errorf("allowed origin: status %d, ACAO %q", status, header.Get("Access-Control-Allow-Origin"))
 	}
-	if res := preflight("https://evil.example"); res.Header.Get("Access-Control-Allow-Origin") != "" {
+	if _, header := preflight("https://evil.example"); header.Get("Access-Control-Allow-Origin") != "" {
 		t.Error("CORS headers sent to an origin that is not allowed")
 	}
 }
