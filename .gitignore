@@ -1,6 +1,6 @@
 # Go
 /api/bin/
-/api/coverage.out
+/api/coverage.*
 *.test
 
 # Node

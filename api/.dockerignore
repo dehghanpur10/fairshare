@@ -1,0 +1,6 @@
+bin/
+coverage.*
+*.test
+.env
+.golangci.yml
+Dockerfile
