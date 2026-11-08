@@ -26,3 +26,6 @@ terraform.tfvars
 .vscode/*
 !.vscode/extensions.json
 .DS_Store
+
+# Real backend settings stay local
+/infra/backend.hcl
