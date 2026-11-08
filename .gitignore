@@ -1,0 +1,28 @@
+# Go
+/api/bin/
+/api/coverage.out
+*.test
+
+# Node
+node_modules/
+/web/dist/
+/web/coverage/
+*.tsbuildinfo
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.auto.tfvars
+terraform.tfvars
+
+# Env and editors
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
