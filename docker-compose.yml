@@ -1,0 +1,56 @@
+# Full stack on one machine: docker compose up --build, then open
+# http://localhost:3000. Postgres is published on 5433 so it does not clash
+# with a Postgres already running on the host.
+name: fairshare
+
+x-database-url: &database-url postgres://fairshare:fairshare@db:5432/fairshare?sslmode=disable
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: fairshare
+      POSTGRES_PASSWORD: fairshare
+      POSTGRES_DB: fairshare
+    ports:
+      - "5433:5432"
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fairshare -d fairshare"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Runs once and exits, the same way deploys run migrations as a one-off
+  # ECS task before new API tasks start.
+  migrate:
+    build: ./api
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: *database-url
+      JWT_SECRET: local-development-only-secret-0000000
+      LOG_LEVEL: debug
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build: ./web
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  db-data:
