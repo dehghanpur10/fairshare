@@ -5,7 +5,7 @@
 
 # Debian rather than Alpine: TypeScript 7, Vite and Tailwind ship native
 # binaries, and glibc builds are the ones every release is tested on.
-FROM node:24-slim AS build
+FROM node:26-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
